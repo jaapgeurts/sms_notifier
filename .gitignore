@@ -1,0 +1,15 @@
+.dub
+docs.json
+__dummy.html
+docs/
+/missing_number
+missing_number.so
+missing_number.dylib
+missing_number.dll
+missing_number.a
+missing_number.lib
+missing_number-test-*
+*.exe
+*.o
+*.obj
+*.lst
