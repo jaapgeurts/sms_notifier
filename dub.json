@@ -9,5 +9,6 @@
 	},
 	"description": "Desktop notifications using dbus",
 	"license": "GPLv2.1",
-	"name": "denotify"
+	"name": "sms_notifier",
+    "targetName": "smsnotifier"
 }

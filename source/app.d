@@ -4,6 +4,8 @@ import std.functional : toDelegate;
 import std.regex;
 import std.array;
 import std.algorithm;
+import std.functional : partial;
+import std.getopt;
 
 import core.thread;
 
@@ -17,8 +19,22 @@ Connection sysbus;
 
 XClipboard clipboard;
 
+enum LogLevel { DEBUG, INFO, WARNING, ERROR, NONE }
+
+LogLevel loggingLevel = LogLevel.NONE;
+
 // FIXME: bad bad bad
 uint[uint] notificationIds;
+
+void log(T...)(LogLevel level, T args) {
+    if (level >= loggingLevel) writeln( to!string(level),": ", args);
+}
+
+alias logdebug = partial!(log,LogLevel.DEBUG);
+alias loginfo = partial!(log,LogLevel.INFO);
+alias logwarn = partial!(log,LogLevel.WARNING);
+alias logerror = partial!(log,LogLevel.ERROR);
+
 
 // TODO: move to main. Now it crashes because assignment copies the object
 // which involves a construct/destruct cycle. This closes the connection
@@ -30,29 +46,29 @@ static this() {
 void copyToClipboardClicked(uint id, string action_key) {
     // TODO: check if id is a notification that I sent
     if (id !in notificationIds) {
-        writeln("copy to click received for non-owned notification");
+        logwarn("CopyToClipboard received for non-owned notification");
         return;
     }
-    writeln("copy to clip: Id: ", id, " Signal: " ~ action_key);
+    loginfo("copy to clip: Id: ", id, " Signal: " ~ action_key);
     clipboard.copyTo(action_key);
 }
 
 void notificationClosed(uint id, uint reason) {
     if (id !in notificationIds) {
-        writeln("notification closed but not mine. Not taking action.");
+        logdebug("Notification closed but not mine. Not taking action.");
         return;
     }
-    writeln("Closed notification: ", id, " reasoncode: ", reason);
+    loginfo("Closed notification: ", id, " reasoncode: ", reason);
     notificationIds.remove(id);
 }
 
 void smsReceived(ObjectPath path, bool val) {
-    writeln("Sms received: path: ", path, " received: ", val ? "yes" : "no");
+    loginfo("Sms received: path: ", path, " received: ", val ? "yes" : "no");
     if (!val) {
-        writeln("Message added locally");
+        logwarn("Message added locally");
         return;
     }
-    writeln("Message received from radio");
+    logdebug("Message received from radio");
     string text = getSmsMessage(path);
     if (text == null)
         return;
@@ -82,7 +98,7 @@ void sendNotification(string text, string[] copyValues) {
         text, list, map, 10000);
     uint id = msg.to!uint();
     notificationIds[id] = id;
-    writeln("Created notification id: ", id);
+    loginfo("Created notification with id: ", id);
 }
 
 string getSmsMessage(ObjectPath path) {
@@ -92,23 +108,41 @@ string getSmsMessage(ObjectPath path) {
     //auto res = dbus_messaging.GetStatus().to!(Variant!DBusAny[string])();
     try {
         auto text = dbus_messaging.Get("org.freedesktop.ModemManager1.Sms", "Text").to!string();
-        writeln("Sms received: ", text);
+        loginfo("Sms received: ", text);
         return text;
     }
     catch (DBusException e) {
-        writeln("Sms message disappeared before it could be accessed.");
+        logerror("Sms message disappeared before it could be accessed.");
         return null;
     }
 }
 
-void main() {
+void main(string[] args) {
 
-    writeln("Starting");
+    try {
+        // dfmt off
+        auto helpInformation = getopt(args,
+            std.getopt.config.passThrough,
+            "log|l", "Logging Level [DEBUG,INFO,WARN,ERROR,NONE*]\t* default", &loggingLevel,
+            );
+        // dfmt on
 
-    writeln("Opening clipboard");
+        if (helpInformation.helpWanted) {
+            defaultGetoptPrinter("sms_notifier. ", helpInformation.options);
+            return;
+        }
+    }
+    catch (Exception e) {
+        logerror(e.msg);
+        return;
+    }
+
+    logdebug("Starting");
+
+    logdebug("Opening clipboard");
     clipboard = new XClipboard();
 
-    writeln("Registering notification signals");
+    loginfo("Registering notification signals");
     // setup router for receiving message from notifications
     // receive message
     DBusError err;
@@ -131,7 +165,7 @@ void main() {
     // install router
     registerRouter(sessbus, router);
 
-    writeln("Registering modem signal");
+    loginfo("Registering modem signal");
 
     // setup modem manager sms notifications
 
@@ -149,6 +183,7 @@ void main() {
     // install router
     registerRouter(sysbus, router2);
 
+    logdebug("Starting event loop");
     while (true) {
         // TODO: DBus probably also supports blocking i/o
         sysbus.tick();
