@@ -1,0 +1,11 @@
+[Unit]
+Description=Show SMS notifications
+
+[Service]
+Type=simple
+StandardOutput=journal
+StandardError=journal
+ExecStart=%h/bin/smsnotifier
+
+[Install]
+WantedBy=default.target
