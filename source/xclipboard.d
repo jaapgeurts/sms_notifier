@@ -17,6 +17,8 @@ private:
 public:
     this() {
         display = XOpenDisplay(null);
+        if (display == null)
+          throw new Exception("Can't open display");
         int N = DefaultScreen(display);
         window = XCreateSimpleWindow(display, RootWindow(display, N), 0, 0, 1, 1, 0,
             BlackPixel(display, N), WhitePixel(display, N));

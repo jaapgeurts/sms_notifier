@@ -17,9 +17,15 @@ import xclipboard;
 Connection sessbus;
 Connection sysbus;
 
-XClipboard clipboard;
+XClipboard clipboard = null;
 
-enum LogLevel { DEBUG, INFO, WARNING, ERROR, NONE }
+enum LogLevel {
+    DEBUG,
+    INFO,
+    WARNING,
+    ERROR,
+    NONE
+}
 
 LogLevel loggingLevel = LogLevel.NONE;
 
@@ -27,14 +33,17 @@ LogLevel loggingLevel = LogLevel.NONE;
 uint[uint] notificationIds;
 
 void log(T...)(LogLevel level, T args) {
-    if (level >= loggingLevel) writeln( to!string(level),": ", args);
+    if (level >= loggingLevel) {
+        writeln(to!string(level), ": ", args);
+        stdout.flush();
+        stderr.flush();
+    }
 }
 
-alias logdebug = partial!(log,LogLevel.DEBUG);
-alias loginfo = partial!(log,LogLevel.INFO);
-alias logwarn = partial!(log,LogLevel.WARNING);
-alias logerror = partial!(log,LogLevel.ERROR);
-
+alias logdebug = partial!(log, LogLevel.DEBUG);
+alias loginfo = partial!(log, LogLevel.INFO);
+alias logwarn = partial!(log, LogLevel.WARNING);
+alias logerror = partial!(log, LogLevel.ERROR);
 
 // TODO: move to main. Now it crashes because assignment copies the object
 // which involves a construct/destruct cycle. This closes the connection
@@ -48,6 +57,10 @@ void copyToClipboardClicked(uint id, string action_key) {
     if (id !in notificationIds) {
         logwarn("CopyToClipboard received for non-owned notification");
         return;
+    }
+    if (!clipboard) {
+        logdebug("Opening clipboard");
+        clipboard = new XClipboard();
     }
     loginfo("copy to clip: Id: ", id, " Signal: " ~ action_key);
     clipboard.copyTo(action_key);
@@ -138,9 +151,6 @@ void main(string[] args) {
     }
 
     logdebug("Starting");
-
-    logdebug("Opening clipboard");
-    clipboard = new XClipboard();
 
     loginfo("Registering notification signals");
     // setup router for receiving message from notifications
