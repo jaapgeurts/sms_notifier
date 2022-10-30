@@ -6,6 +6,8 @@ import x11.Xlib;
 import x11.Xatom;
 import x11.X;
 
+import logging;
+
 class XClipboard {
 
 private:
@@ -18,7 +20,7 @@ public:
     this() {
         display = XOpenDisplay(null);
         if (display == null)
-          throw new Exception("Can't open display");
+            throw new Exception("Can't open display");
         int N = DefaultScreen(display);
         window = XCreateSimpleWindow(display, RootWindow(display, N), 0, 0, 1, 1, 0,
             BlackPixel(display, N), WhitePixel(display, N));
@@ -28,9 +30,11 @@ public:
         if (UTF8 == None)
             UTF8 = XA_STRING;
         selection = XInternAtom(display, "CLIPBOARD", 0);
+        logdebug("Clipboard open");
     }
 
     ~this() {
+        logdebug("Clipboard closed");
         if (window)
             XDestroyWindow(display, window);
         if (display != null)
@@ -38,6 +42,10 @@ public:
     }
 
     void copyTo(string str) {
+
+        // this makes me the owner of the selection
+        // Which means I need to keep checking Xevents to send the data upon request.
+        // Until I lose the selection in the clear statement.
 
         const char* text = str.toStringz;
         XEvent event;
@@ -49,14 +57,19 @@ public:
             XNextEvent(display, &event);
             final switch (event.type) {
             case SelectionRequest:
+                loginfo("XClipboard::SelectionRequest. Storing data in atom");
                 if (event.xselectionrequest.selection != selection)
                     break;
                 XSelectionRequestEvent* xsr = &event.xselectionrequest;
                 XSelectionEvent ev = {0};
                 int R = 0;
-                ev.type = SelectionNotify, ev.display = xsr.display, ev.requestor = xsr.requestor,
-                ev.selection = xsr.selection, ev.time = xsr.time, ev.target = xsr.target, ev.property = xsr
-                    .property;
+                ev.type = SelectionNotify;
+                ev.display = xsr.display;
+                ev.requestor = xsr.requestor,
+                ev.selection = xsr.selection;
+                ev.time = xsr.time;
+                ev.target = xsr.target;
+                ev.property = xsr.property;
                 if (ev.target == targets_atom)
                     R = XChangeProperty(ev.display, ev.requestor, ev.property, XA_ATOM, 32,
                         PropModeReplace, cast(ubyte*)&UTF8, 1);
@@ -74,6 +87,7 @@ public:
                     XSendEvent(display, ev.requestor, 0, 0, cast(XEvent*)&ev);
                 break;
             case SelectionClear:
+                loginfo("XClipboard::SelectionClear.");
                 return;
             }
         }

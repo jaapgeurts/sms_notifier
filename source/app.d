@@ -4,7 +4,6 @@ import std.functional : toDelegate;
 import std.regex;
 import std.array;
 import std.algorithm;
-import std.functional : partial;
 import std.getopt;
 
 import core.thread;
@@ -12,22 +11,18 @@ import core.thread;
 import ddbus;
 import ddbus.c_lib;
 
+import logging;
 import xclipboard;
 
 Connection sessbus;
 Connection sysbus;
 
-XClipboard clipboard = null;
-
-enum LogLevel {
-    DEBUG,
-    INFO,
-    WARNING,
-    ERROR,
-    NONE
+enum NotificationClosedReason {
+    Expired = 1,
+    DismissedByUser = 2,
+    ClosedByCode = 3,
+    UndefinedReserved = 4
 }
-
-LogLevel loggingLevel = LogLevel.NONE;
 
 struct Notification {
     uint id;
@@ -38,19 +33,6 @@ struct Notification {
 // FIXME: bad bad bad
 Notification[uint] notifications;
 
-void log(T...)(LogLevel level, T args) {
-    if (level >= loggingLevel) {
-        writeln(to!string(level), ": ", args);
-        stdout.flush();
-        stderr.flush();
-    }
-}
-
-alias logdebug = partial!(log, LogLevel.DEBUG);
-alias loginfo = partial!(log, LogLevel.INFO);
-alias logwarn = partial!(log, LogLevel.WARNING);
-alias logerror = partial!(log, LogLevel.ERROR);
-
 // TODO: move to main. Now it crashes because assignment copies the object
 // which involves a construct/destruct cycle. This closes the connection
 static this() {
@@ -59,6 +41,7 @@ static this() {
 }
 
 void notificationActionInvoked(uint id, string action_key) {
+    logdebug("Notification action: " ~ to!string(id) ~ ", action: " ~ action_key);
     // TODO: check if id is a notification that I sent
     Notification* notification = id in notifications;
     if (notification == null) {
@@ -66,21 +49,21 @@ void notificationActionInvoked(uint id, string action_key) {
         return;
     }
 
-    if (!clipboard) {
-        logdebug("Opening clipboard");
-        clipboard = new XClipboard();
-        if (clipboard is null) {
-            logerror("Can't open clipboard");
-            return;
-        }
+    logdebug("Opening clipboard");
+    XClipboard clipboard = new XClipboard();
+    if (clipboard is null) {
+        logerror("Can't open clipboard");
+        return;
     }
     if (action_key == "copy" || action_key == "copydelete") {
-        clipboard.copyTo(notification.number);
         loginfo("copy to clip: Id: ", id, " value: " ~ notification.number);
+        clipboard.copyTo(notification.number);
     }
     if (action_key == "copydelete") {
         deleteSmsMessage(notification.sms_path);
     }
+    // have the garbage collector delete it
+    clipboard = null;
 
 }
 
@@ -89,8 +72,9 @@ void notificationClosed(uint id, uint reason) {
         logdebug("Notification closed but not mine. Not taking action.");
         return;
     }
-    loginfo("Closed notification: ", id, " reasoncode: ", reason);
+    loginfo("Closed notification: ", id, " reasoncode: ", reason.to!NotificationClosedReason);
     notifications.remove(id);
+    loginfo("Messages in list: ",notifications.keys);
 }
 
 void smsReceived(ObjectPath path, bool val) {
@@ -119,10 +103,10 @@ void sendNotification(string text, ObjectPath path, string number) {
     PathIface dbus_notify = new PathIface(sessbus, "org.freedesktop.Notifications",
         "/org/freedesktop/Notifications", "org.freedesktop.Notifications");
     string[] list; // must have even num elements. even elem = action, odd elem = message to user
-    list ~= "copy";  //action key for use with notification handler
-    list ~= "Copy"; // user message
+    list ~= "copy"; //action key for use with notification handler
+    list ~= "Copy " ~ number; // user message
     list ~= "copydelete";
-    list ~= "Copy and delete";
+    list ~= "Copy " ~ number ~ " and delete";
 
     Variant!DBusAny[string] map;
 
@@ -147,16 +131,17 @@ string getSmsMessage(ObjectPath path) {
     }
     catch (DBusException e) {
         logerror("Sms message disappeared before it could be accessed.");
+        logerror(e.message);
         return null;
     }
 }
 
 void deleteSmsMessage(ObjectPath path) {
     PathIface dbus_messaging = new PathIface(sysbus, "org.freedesktop.ModemManager1",
-        "org.freedesktop.ModemManager1.Modem.Messaging", "org.freedesktop.ModemManager1.Modem.Messaging");
+        "/org/freedesktop/ModemManager1/Modem/0", "org.freedesktop.ModemManager1.Modem.Messaging");
     try {
-        auto text = dbus_messaging.Delete(path);
         loginfo("Deleting SMS");
+        dbus_messaging.Delete(path);
     }
     catch (DBusException e) {
         logerror("Sms message disappeared before it could be deleted.");
@@ -165,11 +150,13 @@ void deleteSmsMessage(ObjectPath path) {
 
 void main(string[] args) {
 
+    LogLevel logLevel = LogLevel.NONE;
+
     try {
         // dfmt off
         auto helpInformation = getopt(args,
             std.getopt.config.passThrough,
-            "log|l", "Logging Level [DEBUG,INFO,WARN,ERROR,NONE*]\t* default", &loggingLevel,
+            "log|l", "Logging Level [DEBUG,INFO,WARN,ERROR,NONE*]\t* default", &logLevel,
             );
         // dfmt on
 
@@ -182,6 +169,8 @@ void main(string[] args) {
         logerror(e.msg);
         return;
     }
+
+    setDefaultLoggingLevel(logLevel);
 
     logdebug("Starting");
 
