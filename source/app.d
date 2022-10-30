@@ -29,8 +29,14 @@ enum LogLevel {
 
 LogLevel loggingLevel = LogLevel.NONE;
 
+struct Notification {
+    uint id;
+    ObjectPath sms_path;
+    string number;
+}
+
 // FIXME: bad bad bad
-uint[uint] notificationIds;
+Notification[uint] notifications;
 
 void log(T...)(LogLevel level, T args) {
     if (level >= loggingLevel) {
@@ -52,27 +58,39 @@ static this() {
     sessbus = connectToBus();
 }
 
-void copyToClipboardClicked(uint id, string action_key) {
+void notificationActionInvoked(uint id, string action_key) {
     // TODO: check if id is a notification that I sent
-    if (id !in notificationIds) {
+    Notification* notification = id in notifications;
+    if (notification == null) {
         logwarn("CopyToClipboard received for non-owned notification");
         return;
     }
+
     if (!clipboard) {
         logdebug("Opening clipboard");
         clipboard = new XClipboard();
+        if (clipboard is null) {
+            logerror("Can't open clipboard");
+            return;
+        }
     }
-    loginfo("copy to clip: Id: ", id, " Signal: " ~ action_key);
-    clipboard.copyTo(action_key);
+    if (action_key == "copy" || action_key == "copydelete") {
+        clipboard.copyTo(notification.number);
+        loginfo("copy to clip: Id: ", id, " value: " ~ notification.number);
+    }
+    if (action_key == "copydelete") {
+        deleteSmsMessage(notification.sms_path);
+    }
+
 }
 
 void notificationClosed(uint id, uint reason) {
-    if (id !in notificationIds) {
+    if (id !in notifications) {
         logdebug("Notification closed but not mine. Not taking action.");
         return;
     }
     loginfo("Closed notification: ", id, " reasoncode: ", reason);
-    notificationIds.remove(id);
+    notifications.remove(id);
 }
 
 void smsReceived(ObjectPath path, bool val) {
@@ -85,32 +103,35 @@ void smsReceived(ObjectPath path, bool val) {
     string text = getSmsMessage(path);
     if (text == null)
         return;
-    // find any numbers in the text.
-    string[] numbers;
+    // find first number in the text.
+    string number;
     auto r = regex(r"\d+");
-    numbers = matchAll(text, r).map!(m => m.hit).array();
+    number = matchFirst(text, r).hit;
 
-    sendNotification(text, numbers);
+    sendNotification(text, path, number);
 
 }
 
-void sendNotification(string text, string[] copyValues) {
+void sendNotification(string text, ObjectPath path, string number) {
 
     // Send message
 
     PathIface dbus_notify = new PathIface(sessbus, "org.freedesktop.Notifications",
         "/org/freedesktop/Notifications", "org.freedesktop.Notifications");
     string[] list; // must have even num elements. even elem = action, odd elem = message to user
-    foreach (copyval; copyValues) {
-        list ~= copyval;
-        list ~= "Copy " ~ copyval;
-    }
+    list ~= "copy";  //action key for use with notification handler
+    list ~= "Copy"; // user message
+    list ~= "copydelete";
+    list ~= "Copy and delete";
+
     Variant!DBusAny[string] map;
 
     Message msg = dbus_notify.Notify("SMS Received", cast(uint) 0, "mail-message-new-list", "A SMS message was received",
         text, list, map, 10000);
+
     uint id = msg.to!uint();
-    notificationIds[id] = id;
+    Notification notification = Notification(id, path, number);
+    notifications[id] = notification;
     loginfo("Created notification with id: ", id);
 }
 
@@ -127,6 +148,18 @@ string getSmsMessage(ObjectPath path) {
     catch (DBusException e) {
         logerror("Sms message disappeared before it could be accessed.");
         return null;
+    }
+}
+
+void deleteSmsMessage(ObjectPath path) {
+    PathIface dbus_messaging = new PathIface(sysbus, "org.freedesktop.ModemManager1",
+        "org.freedesktop.ModemManager1.Modem.Messaging", "org.freedesktop.ModemManager1.Modem.Messaging");
+    try {
+        auto text = dbus_messaging.Delete(path);
+        loginfo("Deleting SMS");
+    }
+    catch (DBusException e) {
+        logerror("Sms message disappeared before it could be deleted.");
     }
 }
 
@@ -165,7 +198,7 @@ void main(string[] args) {
     MessagePattern patt = MessagePattern("/org/freedesktop/Notifications",
         "org.freedesktop.Notifications",
         "ActionInvoked", true);
-    router.setHandler!(void, uint, string)(patt, toDelegate(&copyToClipboardClicked));
+    router.setHandler!(void, uint, string)(patt, toDelegate(&notificationActionInvoked));
 
     MessagePattern patt3 = MessagePattern("/org/freedesktop/Notifications",
         "org.freedesktop.Notifications",
