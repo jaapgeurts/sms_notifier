@@ -43,7 +43,7 @@ public:
 
     void copyTo(string str) {
 
-        // this makes me the owner of the selection
+        // This makes me the owner of the selection
         // Which means I need to keep checking Xevents to send the data upon request.
         // Until I lose the selection in the clear statement.
 
@@ -51,8 +51,10 @@ public:
         XEvent event;
         Window owner;
         XSetSelectionOwner(display, selection, window, 0);
-        if (XGetSelectionOwner(display, selection) != window)
+        if (XGetSelectionOwner(display, selection) != window) {
+            logerror("Failed to get selection ownership");
             return;
+        }
         while (1) {
             XNextEvent(display, &event);
             final switch (event.type) {

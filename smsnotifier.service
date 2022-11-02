@@ -5,7 +5,7 @@ Description=Show SMS notifications
 Type=simple
 StandardOutput=journal
 StandardError=journal
-ExecStart=%h/bin/smsnotifier
+ExecStart=%h/bin/smsnotifier -l DEBUG
 
 [Install]
-WantedBy=default.target
+WantedBy=graphical-session.target

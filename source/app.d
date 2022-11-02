@@ -14,6 +14,8 @@ import ddbus.c_lib;
 import logging;
 import xclipboard;
 
+XClipboard clipboard;
+
 Connection sessbus;
 Connection sysbus;
 
@@ -41,20 +43,14 @@ static this() {
 }
 
 void notificationActionInvoked(uint id, string action_key) {
-    logdebug("Notification action: " ~ to!string(id) ~ ", action: " ~ action_key);
+    logdebug("notificationActionInvoked(): " ~ to!string(id) ~ ", action: " ~ action_key);
     // TODO: check if id is a notification that I sent
     Notification* notification = id in notifications;
     if (notification == null) {
-        logwarn("CopyToClipboard received for non-owned notification");
+        logdebug("Ignoring action '" ~ action_key ~ "' for non-owned notification.");
         return;
     }
 
-    logdebug("Opening clipboard");
-    XClipboard clipboard = new XClipboard();
-    if (clipboard is null) {
-        logerror("Can't open clipboard");
-        return;
-    }
     if (action_key == "copy" || action_key == "copydelete") {
         loginfo("copy to clip: Id: ", id, " value: " ~ notification.number);
         clipboard.copyTo(notification.number);
@@ -74,7 +70,7 @@ void notificationClosed(uint id, uint reason) {
     }
     loginfo("Closed notification: ", id, " reasoncode: ", reason.to!NotificationClosedReason);
     notifications.remove(id);
-    loginfo("Messages in list: ",notifications.keys);
+    loginfo("Messages in list: ", notifications.keys);
 }
 
 void smsReceived(ObjectPath path, bool val) {
@@ -173,6 +169,13 @@ void main(string[] args) {
     setDefaultLoggingLevel(logLevel);
 
     logdebug("Starting");
+
+    logdebug("Opening clipboard");
+    clipboard = new XClipboard();
+    if (clipboard is null) {
+        logerror("Can't open clipboard");
+        return;
+    }
 
     loginfo("Registering notification signals");
     // setup router for receiving message from notifications
