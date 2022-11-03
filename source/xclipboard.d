@@ -16,6 +16,10 @@ private:
     Atom targets_atom, text_atom, UTF8, XA_ATOM = 4, XA_STRING = 31;
     Atom selection;
 
+    bool hasSelection = false;
+
+    string text;
+
 public:
     this() {
         display = XOpenDisplay(null);
@@ -41,13 +45,13 @@ public:
             XCloseDisplay(display);
     }
 
-    void copyTo(string str) {
+    void copyTo(string text) {
 
         // This makes me the owner of the selection
         // Which means I need to keep checking Xevents to send the data upon request.
         // Until I lose the selection in the clear statement.
 
-        const char* text = str.toStringz;
+        this.text = text;
         XEvent event;
         Window owner;
         XSetSelectionOwner(display, selection, window, 0);
@@ -55,7 +59,18 @@ public:
             logerror("Failed to get selection ownership");
             return;
         }
-        while (1) {
+        hasSelection = true;
+    }
+
+    void processSelectionEvents() {
+        if (!hasSelection)
+            return;
+
+        XEvent event;
+        const char* textarray = text.toStringz;
+
+
+        while (XPending(display) > 0) {
             XNextEvent(display, &event);
             final switch (event.type) {
             case SelectionRequest:
@@ -77,11 +92,11 @@ public:
                         PropModeReplace, cast(ubyte*)&UTF8, 1);
                 else if (ev.target == XA_STRING || ev.target == text_atom)
                     R = XChangeProperty(ev.display, ev.requestor, ev.property, XA_STRING, 8, PropModeReplace, cast(
-                            ubyte*) text, cast(int) str
+                            ubyte*) textarray, cast(int) text
                             .length);
                 else if (ev.target == UTF8)
                     R = XChangeProperty(ev.display, ev.requestor, ev.property, UTF8, 8, PropModeReplace, cast(
-                            ubyte*) text, cast(int) str
+                            ubyte*) textarray, cast(int) text
                             .length);
                 else
                     ev.property = None;
@@ -89,6 +104,7 @@ public:
                     XSendEvent(display, ev.requestor, 0, 0, cast(XEvent*)&ev);
                 break;
             case SelectionClear:
+                hasSelection = false;
                 loginfo("XClipboard::SelectionClear.");
                 return;
             }

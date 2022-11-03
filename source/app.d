@@ -223,6 +223,10 @@ void main(string[] args) {
         // TODO: DBus probably also supports blocking i/o
         sysbus.tick();
         sessbus.tick();
+        
+        clipboard.processSelectionEvents();
+        
         Thread.sleep(500.msecs);
+
     }
 }
