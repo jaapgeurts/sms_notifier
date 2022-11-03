@@ -48,12 +48,10 @@ public:
     void copyTo(string text) {
 
         // This makes me the owner of the selection
-        // Which means I need to keep checking Xevents to send the data upon request.
+        // Which means keep checking XEvents to send the data upon request.
         // Until I lose the selection in the clear statement.
 
         this.text = text;
-        XEvent event;
-        Window owner;
         XSetSelectionOwner(display, selection, window, 0);
         if (XGetSelectionOwner(display, selection) != window) {
             logerror("Failed to get selection ownership");
@@ -68,7 +66,6 @@ public:
 
         XEvent event;
         const char* textarray = text.toStringz;
-
 
         while (XPending(display) > 0) {
             XNextEvent(display, &event);
