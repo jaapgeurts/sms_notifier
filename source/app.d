@@ -5,6 +5,7 @@ import std.regex;
 import std.array;
 import std.algorithm;
 import std.getopt;
+import std.concurrency;
 
 import core.thread;
 
@@ -14,10 +15,11 @@ import ddbus.c_lib;
 import logging;
 import xclipboard;
 
-XClipboard clipboard;
+// TODO: make thread accessible
+__gshared Connection sessbus;
+__gshared Connection sysbus;
 
-Connection sessbus;
-Connection sysbus;
+LogLevel logLevel = LogLevel.NONE;
 
 enum NotificationClosedReason {
     Expired = 1,
@@ -32,10 +34,10 @@ struct Notification {
     string number;
 }
 
-// FIXME: bad bad bad
-Notification[uint] notifications;
+// FIXME: bad bad bad because it's global shared
+__gshared Notification[uint] notifications;
 
-// TODO: move to main. Now it crashes because assignment copies the object
+// TODO: move to main. In main it crashes because assignment copies the object
 // which involves a construct/destruct cycle. This closes the connection
 static this() {
     sysbus = connectToBus(DBusBusType.DBUS_BUS_SYSTEM);
@@ -53,14 +55,14 @@ void notificationActionInvoked(uint id, string action_key) {
 
     if (action_key == "copy" || action_key == "copydelete") {
         loginfo("copy to clip: Id: ", id, " value: " ~ notification.number);
-        clipboard.copyTo(notification.number);
+
+        claimClipboardSelection(notification.number, loggingLevel); // returns immediately
+
     }
+
     if (action_key == "copydelete") {
         deleteSmsMessage(notification.sms_path);
     }
-    // have the garbage collector delete it
-    clipboard = null;
-
 }
 
 void notificationClosed(uint id, uint reason) {
@@ -95,8 +97,9 @@ void smsReceived(ObjectPath path, bool val) {
 void sendNotification(string text, ObjectPath path, string number) {
 
     // Send message
-
-    PathIface dbus_notify = new PathIface(sessbus, "org.freedesktop.Notifications",
+    DBusError error;
+    Connection conn = Connection(dbus_bus_get_private(DBusBusType.DBUS_BUS_SESSION,&error));
+    PathIface dbus_notify = new PathIface(conn, "org.freedesktop.Notifications",
         "/org/freedesktop/Notifications", "org.freedesktop.Notifications");
     string[] list; // must have even num elements. even elem = action, odd elem = message to user
     list ~= "copy"; //action key for use with notification handler
@@ -104,7 +107,7 @@ void sendNotification(string text, ObjectPath path, string number) {
     list ~= "copydelete";
     list ~= "Copy " ~ number ~ " and delete";
 
-    Variant!DBusAny[string] map;
+    ddbus.Variant!DBusAny[string] map;
 
     Message msg = dbus_notify.Notify("SMS Received", cast(uint) 0, "mail-message-new-list", "A SMS message was received",
         text, list, map, 10000);
@@ -113,6 +116,7 @@ void sendNotification(string text, ObjectPath path, string number) {
     Notification notification = Notification(id, path, number);
     notifications[id] = notification;
     loginfo("Created notification with id: ", id);
+    conn.close();
 }
 
 string getSmsMessage(ObjectPath path) {
@@ -146,8 +150,6 @@ void deleteSmsMessage(ObjectPath path) {
 
 void main(string[] args) {
 
-    LogLevel logLevel = LogLevel.NONE;
-
     try {
         // dfmt off
         auto helpInformation = getopt(args,
@@ -170,14 +172,44 @@ void main(string[] args) {
 
     logdebug("Starting");
 
-    logdebug("Opening clipboard");
-    clipboard = new XClipboard();
-    if (clipboard is null) {
-        logerror("Can't open clipboard");
-        return;
-    }
+    // Don't lock any data structures so we can call from multiple threads
+    dbus_threads_init_default();
 
-    loginfo("Registering notification signals");
+    auto sysbusTid = spawn(&DBusClientModemProc, logLevel);
+
+    auto sessbusTid = spawn(&DBusClientNotificationsProc, logLevel);
+
+}
+
+void DBusClientModemProc(LogLevel ll) {
+    setDefaultLoggingLevel(ll);
+    loginfo("Starting dbus modem thread");
+
+    DBusError err;
+
+    // setup modem manager sms notifications
+    auto router2 = new MessageRouter();
+    dbus_bus_add_match(sysbus.conn,
+        "type='signal',interface='org.freedesktop.ModemManager1.Modem.Messaging'",
+        &err);
+    dbus_connection_flush(sysbus.conn);
+
+    MessagePattern patt2 = MessagePattern("/org/freedesktop/ModemManager1/Modem/0",
+        "org.freedesktop.ModemManager1.Modem.Messaging",
+        "Added", true);
+    router2.setHandler!(void, ObjectPath, bool)(patt2, toDelegate(&smsReceived));
+
+    // install router
+    registerRouter(sysbus, router2);
+
+    // must do tick() so as to not block the connection
+    sysbus.simpleMainLoop();
+}
+
+void DBusClientNotificationsProc(LogLevel ll) {
+    setDefaultLoggingLevel(ll);
+    loginfo("Starting dbus notification thread");
+
     // setup router for receiving message from notifications
     // receive message
     DBusError err;
@@ -200,33 +232,5 @@ void main(string[] args) {
     // install router
     registerRouter(sessbus, router);
 
-    loginfo("Registering modem signal");
-
-    // setup modem manager sms notifications
-
-    auto router2 = new MessageRouter();
-    dbus_bus_add_match(sysbus.conn,
-        "type='signal',interface='org.freedesktop.ModemManager1.Modem.Messaging'",
-        &err);
-    dbus_connection_flush(sysbus.conn);
-
-    MessagePattern patt2 = MessagePattern("/org/freedesktop/ModemManager1/Modem/0",
-        "org.freedesktop.ModemManager1.Modem.Messaging",
-        "Added", true);
-    router2.setHandler!(void, ObjectPath, bool)(patt2, toDelegate(&smsReceived));
-
-    // install router
-    registerRouter(sysbus, router2);
-
-    logdebug("Starting event loop");
-    while (true) {
-        // TODO: DBus probably also supports blocking i/o
-        sysbus.tick();
-        sessbus.tick();
-        
-        clipboard.processSelectionEvents();
-        
-        Thread.sleep(500.msecs);
-
-    }
+    sessbus.simpleMainLoop();
 }
