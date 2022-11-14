@@ -90,7 +90,6 @@ private void selectionProc(string text, LogLevel ll) {
         case SelectionClear:
             ownSelection = false;
             loginfo("XClipboard::SelectionClear.");
-            return;
         }
     }
 
