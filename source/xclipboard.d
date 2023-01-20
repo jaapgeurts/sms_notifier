@@ -51,7 +51,7 @@ private void selectionProc(string text, LogLevel ll) {
 
     bool ownSelection = true;
 
-    XEvent event;
+    XEvent event;   
     const char* textarray = text.toStringz;
 
     while (ownSelection) {

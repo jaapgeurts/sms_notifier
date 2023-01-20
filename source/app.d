@@ -6,6 +6,7 @@ import std.array;
 import std.algorithm;
 import std.getopt;
 import std.concurrency;
+import std.string : fromStringz;
 
 import core.thread;
 
@@ -32,6 +33,8 @@ struct Notification {
 
 // FIXME: bad bad bad because it's global shared
 __gshared Notification[uint] notifications;
+shared ObjectPath dbusModemPath;
+
 
 void notificationActionInvoked(uint id, string action_key) {
     logdebug("notificationActionInvoked(): " ~ to!string(id) ~ ", action: " ~ action_key);
@@ -46,7 +49,7 @@ void notificationActionInvoked(uint id, string action_key) {
         loginfo("copy to clip: Id: ", id, " value: " ~ notification.number);
 
         claimClipboardSelection(notification.number, loggingLevel); // returns immediately
-
+    // TODO: wait if succesful and only then delete the SMS
     }
 
     if (action_key == "copydelete") {
@@ -77,10 +80,14 @@ void smsReceived(ObjectPath path, bool val) {
     // find first number in the text.
     string number;
     auto r = regex(r"\d+");
-    number = matchFirst(text, r).hit;
+    auto matches = matchFirst(text, r);
+    sendNotification(text, path, matches.length >0 ? matches.hit:"");
 
-    sendNotification(text, path, number);
+}
 
+
+void modemRemoved(ObjectPath path, bool val) {
+    loginfo("Modem removed at: ",path);
 }
 
 void sendNotification(string text, ObjectPath path, string number) {
@@ -100,7 +107,9 @@ void sendNotification(string text, ObjectPath path, string number) {
 
     ddbus.Variant!DBusAny[string] map;
 
-    Message msg = dbus_notify.Notify("SMS Received", cast(uint) 0, "mail-message-new-list", "A SMS message was received",
+    Message msg = dbus_notify.Notify("SMS Received", cast(uint) 0,
+        "mail-message-new-list",
+        "A SMS message was received",
         text, list, map, 10000);
 
     uint id = msg.to!uint();
@@ -136,8 +145,9 @@ void deleteSmsMessage(ObjectPath path) {
     scope (exit)
         conn.close();
 
+    const ObjectPath lp = dbusModemPath;
     PathIface dbus_messaging = new PathIface(conn, "org.freedesktop.ModemManager1",
-        "/org/freedesktop/ModemManager1/Modem/0", "org.freedesktop.ModemManager1.Modem.Messaging");
+        lp.value(), "org.freedesktop.ModemManager1.Modem.Messaging");
     try {
         loginfo("Deleting SMS");
         dbus_messaging.Delete(path);
@@ -174,44 +184,80 @@ void main(string[] args) {
     // Don't lock any data structures so we can call from multiple threads
     dbus_threads_init_default();
 
+    dbusModemPath = getDbusModemPath();
+
     auto sysbusTid = spawn(&DBusClientModemProc, logLevel);
 
     auto sessbusTid = spawn(&DBusClientNotificationsProc, logLevel);
 
 }
 
+ObjectPath getDbusModemPath()
+{
+    DBusError error;
+    Connection conn = Connection(dbus_bus_get_private(DBusBusType.DBUS_BUS_SYSTEM, &error));
+    scope (exit)
+        conn.close();
+
+    PathIface dbus_messaging = new PathIface(conn, "org.freedesktop.ModemManager1",
+        "/org/freedesktop/ModemManager1", "org.freedesktop.DBus.ObjectManager");
+
+    //out ARRAY of DICT_ENTRY<OBJPATH,ARRAY of DICT_ENTRY<STRING,ARRAY of DICT_ENTRY<STRING,VARIANT>>> objpath_interfaces_and_properties
+    //ddbus.Variant!DBusAny[string]
+    auto dict = dbus_messaging.GetManagedObjects().to!(ddbus.Variant!DBusAny[ObjectPath]);
+    if (dict.length >0) {
+        loginfo("Found ",dict.length, " modems. Using the first one found");
+        return dict.keys[0];
+    }
+
+    logerror("There are no modems in your system");
+
+    return ObjectPath();
+}
+
 void DBusClientModemProc(LogLevel ll) {
     // TODO: make thread accessible
 
-    Connection sessbus = connectToBus(DBusBusType.DBUS_BUS_SYSTEM);
+    Connection sysbus = connectToBus(DBusBusType.DBUS_BUS_SYSTEM);
 
     setDefaultLoggingLevel(ll);
     logdebug("Starting dbus modem thread");
+
 
     DBusError err;
 
     // setup modem manager sms notifications
     auto router2 = new MessageRouter();
-    dbus_bus_add_match(sessbus.conn,
+    // TODO: Write decent wrapper: add signal MessageRoute as well
+    dbus_bus_add_match(sysbus.conn,
         "type='signal',interface='org.freedesktop.ModemManager1.Modem.Messaging'",
-        &err);
-    dbus_connection_flush(sessbus.conn);
+        &err); // allow to receive signals from the given interface
+    // dbus_bus_add_match(sysbus.conn,
+    //     "type='signal',interface='org.freedesktop.DBus.ObjectManager'",
+    //     &err); // allow to receive signals from the given interface
+    // dbus_connection_flush(sysbus.conn);
 
-    MessagePattern patt2 = MessagePattern("/org/freedesktop/ModemManager1/Modem/0",
+    const ObjectPath lp = dbusModemPath; // make a copy of a shared value
+    MessagePattern patt2 = MessagePattern(lp.value(),
         "org.freedesktop.ModemManager1.Modem.Messaging",
         "Added", true);
     router2.setHandler!(void, ObjectPath, bool)(patt2, toDelegate(&smsReceived));
 
+    // MessagePattern patt3 = MessagePattern("/org/freedesktop/ModemManager1",
+    //     "org.freedesktop.DBus.ObjectManager",
+    //     "InterfacesRemoved", true);
+    // router2.setHandler!(void, ObjectPath, bool)(patt3, toDelegate(&modemRemoved));
+
     // install router
-    registerRouter(sessbus, router2);
+    registerRouter(sysbus, router2);
 
     logdebug("DBUS: waiting for modem messages");
-    sessbus.simpleMainLoop();
+    sysbus.simpleMainLoop();
 }
 
 void DBusClientNotificationsProc(LogLevel ll) {
 
-    Connection sysbus = connectToBus();
+    Connection sessbus = connectToBus();
 
     setDefaultLoggingLevel(ll);
     logdebug("Starting dbus notification thread");
@@ -219,10 +265,10 @@ void DBusClientNotificationsProc(LogLevel ll) {
     // setup router for receiving message from notifications
     // receive message
     DBusError err;
-    dbus_bus_add_match(sysbus.conn,
+    dbus_bus_add_match(sessbus.conn,
         "type='signal',interface='org.freedesktop.Notifications'",
-        &err); // see signals from the given interface
-    dbus_connection_flush(sysbus.conn);
+        &err); // allow to receive signals from the given interface
+    dbus_connection_flush(sessbus.conn);
 
     auto router = new MessageRouter();
     MessagePattern patt = MessagePattern("/org/freedesktop/Notifications",
@@ -237,7 +283,7 @@ void DBusClientNotificationsProc(LogLevel ll) {
 
     // install router
     logdebug("DBUS: Waiting for notification messages");
-    registerRouter(sysbus, router);
+    registerRouter(sessbus, router);
 
-    sysbus.simpleMainLoop();
+    sessbus.simpleMainLoop();
 }
