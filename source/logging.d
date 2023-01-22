@@ -12,7 +12,7 @@ enum LogLevel {
     NONE
 }
 
-LogLevel loggingLevel = LogLevel.NONE;
+shared LogLevel loggingLevel = LogLevel.NONE;
 
 void log(T...)(LogLevel level, T args) {
     if (level >= loggingLevel) {
