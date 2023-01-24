@@ -99,7 +99,7 @@ extern (C) {
 uint onAddWatch(DBusWatch* watch, void *data)
 {
     if (dbus_watch_get_enabled(watch)) {
-        logdebug("Adding watch");
+        logdebug("Adding dbus watch");
         WatchConn watchCon = {
             watch : watch,
             connection : cast(DBusConnection*)data
@@ -111,7 +111,7 @@ uint onAddWatch(DBusWatch* watch, void *data)
 
 void onRemoveWatch(DBusWatch* watch, void *data)
 {
-    logdebug("removing watch");
+    logdebug("removing dbus watch");
     WatchConn watchCon = {
             watch : watch,
             connection : cast(DBusConnection*)data
@@ -122,7 +122,7 @@ void onRemoveWatch(DBusWatch* watch, void *data)
 
 void onWatchToggled(DBusWatch* watch, void *data)
 {
-    logdebug("watch enable toggled");
+    logdebug("dbus watch enable toggled");
     WatchConn watchCon = {
             watch : watch,
             connection : cast(DBusConnection*)data
