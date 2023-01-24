@@ -10,7 +10,9 @@ import ddbus.c_lib;
 import notifications;
 import logging;
 
-private ObjectPath dbusModemPath;
+private shared ObjectPath dbusModemPath;
+private MessageRouter router2;
+private MessagePattern modemHandlerPattern;
 
 void DBusClientModemProc(LogLevel ll) {
     // TODO: make thread accessible
@@ -27,7 +29,7 @@ void DBusClientModemProc(LogLevel ll) {
     DBusError err;
 
     // setup modem manager sms notifications
-    auto router2 = new MessageRouter();
+    router2 = new MessageRouter();
     // TODO: Write decent wrapper: add signal MessageRoute as well
     dbus_bus_add_match(sysbus.conn,
         "type='signal',interface='org.freedesktop.ModemManager1.Modem.Messaging'",
@@ -37,27 +39,35 @@ void DBusClientModemProc(LogLevel ll) {
         &err); // allow to receive signals from the given interface
     dbus_connection_flush(sysbus.conn);
 
-    const ObjectPath lp = dbusModemPath; // make a copy of a shared value
-    MessagePattern patt2 = MessagePattern(lp.value(),
-        "org.freedesktop.ModemManager1.Modem.Messaging",
-        "Added", true);
-    router2.setHandler!(void, ObjectPath, bool)(patt2, toDelegate(&onSmsReceived));
-
-    MessagePattern patt3 = MessagePattern("/org/freedesktop/ModemManager1",
-        "org.freedesktop.DBus.ObjectManager",
+    MessagePattern patt3 = MessagePattern(ObjectPath("/org/freedesktop/ModemManager1"),
+        interfaceName("org.freedesktop.DBus.ObjectManager"),
         "InterfacesRemoved", true);
     router2.setHandler!(void, ObjectPath,string[])(patt3, toDelegate(&onModemRemoved));
 
-    MessagePattern patt4 = MessagePattern("/org/freedesktop/ModemManager1",
-        "org.freedesktop.DBus.ObjectManager",
+    MessagePattern patt4 = MessagePattern(ObjectPath("/org/freedesktop/ModemManager1"),
+        interfaceName("org.freedesktop.DBus.ObjectManager"),
         "InterfacesAdded", true);
     router2.setHandler!(void, ObjectPath,ddbus.Variant!DBusAny[string][string])(patt4, toDelegate(&onModemAdded));
+
+    addModemHandlers(dbusModemPath);
 
     // install router
     registerRouter(sysbus, router2);
 
     logdebug("DBUS: waiting for modem messages");
     sysbus.simpleMainLoop();
+}
+
+private void addModemHandlers(ObjectPath modemPath) {
+    modemHandlerPattern = MessagePattern(modemPath,
+        interfaceName("org.freedesktop.ModemManager1.Modem.Messaging"),
+        "Added", true);
+    router2.setHandler!(void, ObjectPath, bool)(modemHandlerPattern, toDelegate(&onSmsReceived));
+
+}
+
+private void removeModemHandlers() {
+    router2.removeHandler(modemHandlerPattern);
 }
 
 // TODO: consider deleting sms not by path, but by modem ID and sms ID
@@ -67,8 +77,9 @@ public void deleteSmsMessage(string objPath) {
     scope (exit) conn.close();
 
     const ObjectPath lp = dbusModemPath;
-    PathIface dbus_messaging = new PathIface(conn, "org.freedesktop.ModemManager1",
-        lp.value(), "org.freedesktop.ModemManager1.Modem.Messaging");
+    PathIface dbus_messaging = new PathIface(conn,
+        busName("org.freedesktop.ModemManager1"),
+        lp, interfaceName("org.freedesktop.ModemManager1.Modem.Messaging"));
     try {
         loginfo("Deleting SMS");
         ObjectPath path = objPath;
@@ -82,10 +93,14 @@ public void deleteSmsMessage(string objPath) {
 private void onModemAdded(ObjectPath path, ddbus.Variant!DBusAny[string][string]) {
     loginfo("Modem add at: ",path);
     // stop and restart the modemproc
+    removeModemHandlers();
+
+    addModemHandlers(path);
 }
 
 private void onModemRemoved(ObjectPath path,string[] interfaces) {
     loginfo("Modem removed at: ",path);
+    removeModemHandlers();
 }
 
 private void onSmsReceived(ObjectPath path, bool val) {
@@ -111,8 +126,8 @@ private string getSmsMessage(ObjectPath path) {
     Connection conn = Connection(dbus_bus_get_private(DBusBusType.DBUS_BUS_SYSTEM, &error));
     scope (exit) conn.close();
 
-    PathIface dbus_messaging = new PathIface(conn, "org.freedesktop.ModemManager1",
-        path, "org.freedesktop.DBus.Properties");
+    PathIface dbus_messaging = new PathIface(conn, busName("org.freedesktop.ModemManager1"),
+        path, interfaceName("org.freedesktop.DBus.Properties"));
     //auto res = dbus_messaging.GetStatus().to!(Variant!DBusAny[string])();
     try {
         auto text = dbus_messaging.Get("org.freedesktop.ModemManager1.Sms", "Text").to!string();
@@ -132,8 +147,10 @@ private ObjectPath getDbusModemPath()
     Connection conn = Connection(dbus_bus_get_private(DBusBusType.DBUS_BUS_SYSTEM, &error));
     scope (exit) conn.close();
 
-    PathIface dbus_messaging = new PathIface(conn, "org.freedesktop.ModemManager1",
-        "/org/freedesktop/ModemManager1", "org.freedesktop.DBus.ObjectManager");
+    PathIface dbus_messaging = new PathIface(conn,
+        busName("org.freedesktop.ModemManager1"),
+        ObjectPath("/org/freedesktop/ModemManager1"),
+        interfaceName("org.freedesktop.DBus.ObjectManager"));
 
     //out ARRAY of DICT_ENTRY<OBJPATH,ARRAY of DICT_ENTRY<STRING,ARRAY of DICT_ENTRY<STRING,VARIANT>>> objpath_interfaces_and_properties
     //ddbus.Variant!DBusAny[string]

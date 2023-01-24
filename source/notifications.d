@@ -44,13 +44,13 @@ void DBusClientNotificationsProc(LogLevel ll) {
     dbus_connection_flush(sessbus.conn);
 
     auto router = new MessageRouter();
-    MessagePattern patt = MessagePattern("/org/freedesktop/Notifications",
-        "org.freedesktop.Notifications",
+    MessagePattern patt = MessagePattern(ObjectPath("/org/freedesktop/Notifications"),
+        interfaceName("org.freedesktop.Notifications"),
         "ActionInvoked", true);
     router.setHandler!(void, uint, string)(patt, toDelegate(&onNotificationActionInvoked));
 
-    MessagePattern patt3 = MessagePattern("/org/freedesktop/Notifications",
-        "org.freedesktop.Notifications",
+    MessagePattern patt3 = MessagePattern(ObjectPath("/org/freedesktop/Notifications"),
+        interfaceName("org.freedesktop.Notifications"),
         "NotificationClosed", true);
     router.setHandler!(void, uint, uint)(patt3, toDelegate(&onNotificationClosed));
 
@@ -68,8 +68,10 @@ void sendNotification(string text, string path, string number) {
     Connection conn = Connection(dbus_bus_get_private(DBusBusType.DBUS_BUS_SESSION, &error));
     scope (exit)
         conn.close();
-    PathIface dbus_notify = new PathIface(conn, "org.freedesktop.Notifications",
-        "/org/freedesktop/Notifications", "org.freedesktop.Notifications");
+    PathIface dbus_notify = new PathIface(conn,
+        busName("org.freedesktop.Notifications"),
+        ObjectPath("/org/freedesktop/Notifications"),
+        interfaceName("org.freedesktop.Notifications"));
     string[] list; // must have even num elements. even elem = action, odd elem = message to user
     list ~= "copy"; //action key for use with notification handler
     list ~= "Copy " ~ number; // user message
@@ -81,7 +83,7 @@ void sendNotification(string text, string path, string number) {
     Message msg = dbus_notify.Notify("SMS Received", cast(uint) 0,
         "mail-message-new-list",
         "A SMS message was received",
-        text, list, map, 10000);
+        text, list, map, 10_000);
 
     uint id = msg.to!uint();
     Notification notification = Notification(id, path, number);
