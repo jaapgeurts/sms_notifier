@@ -62,10 +62,8 @@ void main(string[] args) {
     }
 
     dbus_connection_set_watch_functions(sysbus.conn, &onAddWatch, &onRemoveWatch,&onWatchToggled, sysbus.conn, &dbus_free);
-    // dbus_connection_set_timeout_functions(sysbus.conn, &onAddTimeout, &onRemoveTimeout,&onTimeoutToggled, null, &dbus_free);
 
     dbus_connection_set_watch_functions(sessbus.conn, &onAddWatch, &onRemoveWatch,&onWatchToggled, sessbus.conn, &dbus_free);
-    // dbus_connection_set_timeout_functions(sessbus.conn, &onAddTimeout, &onRemoveTimeout,&onTimeoutToggled, null, &dbus_free);
 
     DBusClientModemProc(sysbus,logLevel);
     DBusClientNotificationsProc(sessbus,logLevel);
@@ -82,7 +80,7 @@ void main(string[] args) {
             }
         }
         if (poll.poll(fds.ptr, nfds, -1) == -1) {
-            logerror("Error waiting for dbus: ", strerror(errno));
+            logerror("Error in poll() on dbus fd's: ", strerror(errno));
         }
         for(int i=0;i<nfds;i++) {
             auto pfd = fds[i];
@@ -101,7 +99,7 @@ extern (C) {
 uint onAddWatch(DBusWatch* watch, void *data)
 {
     if (dbus_watch_get_enabled(watch)) {
-        logdebug("onAddWatch() ", watch);
+        logdebug("Adding watch");
         WatchConn watchCon = {
             watch : watch,
             connection : cast(DBusConnection*)data
@@ -113,7 +111,7 @@ uint onAddWatch(DBusWatch* watch, void *data)
 
 void onRemoveWatch(DBusWatch* watch, void *data)
 {
-    logdebug("onRemoveWatch()");
+    logdebug("removing watch");
     WatchConn watchCon = {
             watch : watch,
             connection : cast(DBusConnection*)data
@@ -124,7 +122,7 @@ void onRemoveWatch(DBusWatch* watch, void *data)
 
 void onWatchToggled(DBusWatch* watch, void *data)
 {
-    logdebug("onWatchToggled()");
+    logdebug("watch enable toggled");
     WatchConn watchCon = {
             watch : watch,
             connection : cast(DBusConnection*)data
@@ -135,23 +133,6 @@ void onWatchToggled(DBusWatch* watch, void *data)
     else
         watches.insertBack(watchCon);
 }
-/+
-uint onAddTimeout(DBusTimeout* timeout, void *data)
-{
-    logdebug("onAddTimeout()");
-    timeouts.insertBack(timeout);
-    return 1;
-}
-
-void onRemoveTimeout(DBusTimeout* timeout, void *data)
-{
-  logdebug("onRemoveTimeout()");
-}
-
-void onTimeoutToggled(DBusTimeout* timeout, void *data)
-{
-  logdebug("onTimeoutToggled()");
-}+/
 
 }
 
