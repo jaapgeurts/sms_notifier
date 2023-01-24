@@ -27,10 +27,7 @@ struct Notification {
 // FIXME: bad bad bad because it's global shared
 __gshared Notification[uint] notifications;
 
-void DBusClientNotificationsProc(LogLevel ll) {
-
-    Connection sessbus = connectToBus();
-    scope(exit) sessbus.close();
+void DBusClientNotificationsProc(Connection sessbus, LogLevel ll) {
 
     setDefaultLoggingLevel(ll);
     logdebug("Starting dbus notification thread");
@@ -57,8 +54,6 @@ void DBusClientNotificationsProc(LogLevel ll) {
     // install router
     logdebug("DBUS: Waiting for notification messages");
     registerRouter(sessbus, router);
-
-    sessbus.simpleMainLoop();
 }
 
 void sendNotification(string text, string path, string number) {
@@ -66,8 +61,7 @@ void sendNotification(string text, string path, string number) {
     // Send message
     DBusError error;
     Connection conn = Connection(dbus_bus_get_private(DBusBusType.DBUS_BUS_SESSION, &error));
-    scope (exit)
-        conn.close();
+    scope (exit) conn.close();
     PathIface dbus_notify = new PathIface(conn,
         busName("org.freedesktop.Notifications"),
         ObjectPath("/org/freedesktop/Notifications"),

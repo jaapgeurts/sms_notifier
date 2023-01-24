@@ -10,17 +10,14 @@ import ddbus.c_lib;
 import notifications;
 import logging;
 
-private shared ObjectPath dbusModemPath;
+private ObjectPath dbusModemPath;
 private MessageRouter router2;
 private MessagePattern modemHandlerPattern;
 
-void DBusClientModemProc(LogLevel ll) {
+void DBusClientModemProc(Connection sysbus, LogLevel ll) {
     // TODO: make thread accessible
 
     dbusModemPath = getDbusModemPath();
-
-    Connection sysbus = connectToBus(DBusBusType.DBUS_BUS_SYSTEM);
-    scope(exit) sysbus.close();
 
     setDefaultLoggingLevel(ll);
     logdebug("Starting dbus modem thread");
@@ -55,7 +52,6 @@ void DBusClientModemProc(LogLevel ll) {
     registerRouter(sysbus, router2);
 
     logdebug("DBUS: waiting for modem messages");
-    sysbus.simpleMainLoop();
 }
 
 private void addModemHandlers(ObjectPath modemPath) {
@@ -66,8 +62,8 @@ private void addModemHandlers(ObjectPath modemPath) {
 
 }
 
-private void removeModemHandlers() {
-    router2.removeHandler(modemHandlerPattern);
+private void removeModemHandlers(MessagePattern patt) {
+    router2.removeHandler(patt);
 }
 
 // TODO: consider deleting sms not by path, but by modem ID and sms ID
@@ -93,14 +89,14 @@ public void deleteSmsMessage(string objPath) {
 private void onModemAdded(ObjectPath path, ddbus.Variant!DBusAny[string][string]) {
     loginfo("Modem add at: ",path);
     // stop and restart the modemproc
-    removeModemHandlers();
+    removeModemHandlers(modemHandlerPattern);
 
     addModemHandlers(path);
 }
 
 private void onModemRemoved(ObjectPath path,string[] interfaces) {
     loginfo("Modem removed at: ",path);
-    removeModemHandlers();
+    removeModemHandlers(modemHandlerPattern);
 }
 
 private void onSmsReceived(ObjectPath path, bool val) {

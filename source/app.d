@@ -1,11 +1,29 @@
 import std.getopt;
 import std.concurrency;
+import std.container;
+import std.algorithm.searching : find, canFind;
+import std.range: take;
+import core.stdc.errno;
+import core.stdc.string : strerror;
 
+import poll;
 import modem;
 import notifications;
 import logging;
 
+import ddbus;
 import ddbus.c_lib;
+
+struct WatchConn {
+    DBusWatch* watch;
+    DBusConnection* connection;
+
+    bool opEquals()(auto ref const WatchConn other) const {
+        return watch == other.watch && connection == other.connection;
+    }
+}
+
+Array!(WatchConn) watches;
 
 void main(string[] args) {
 
@@ -36,10 +54,104 @@ void main(string[] args) {
     // Don't lock any data structures so we can call from multiple threads
     dbus_threads_init_default();
 
-    auto sysbusTid = spawn(&DBusClientModemProc, logLevel);
+    Connection sysbus = connectToBus(DBusBusType.DBUS_BUS_SYSTEM);
+    Connection sessbus = connectToBus();
+    scope(exit) {
+        sysbus.close();
+        sessbus.close();
+    }
 
-    auto sessbusTid = spawn(&DBusClientNotificationsProc, logLevel);
+    dbus_connection_set_watch_functions(sysbus.conn, &onAddWatch, &onRemoveWatch,&onWatchToggled, sysbus.conn, &dbus_free);
+    // dbus_connection_set_timeout_functions(sysbus.conn, &onAddTimeout, &onRemoveTimeout,&onTimeoutToggled, null, &dbus_free);
 
+    dbus_connection_set_watch_functions(sessbus.conn, &onAddWatch, &onRemoveWatch,&onWatchToggled, sessbus.conn, &dbus_free);
+    // dbus_connection_set_timeout_functions(sessbus.conn, &onAddTimeout, &onRemoveTimeout,&onTimeoutToggled, null, &dbus_free);
+
+    DBusClientModemProc(sysbus,logLevel);
+    DBusClientNotificationsProc(sessbus,logLevel);
+
+    while (true) {
+        // Wait for activity on the connections
+        int nfds = 0;
+        pollfd[] fds = new pollfd[watches.length];
+        foreach(watch; watches) {
+            if (dbus_watch_get_enabled(watch.watch)) {
+                fds[nfds].fd = dbus_watch_get_unix_fd(watch.watch);
+                fds[nfds].events = cast(short)dbus_watch_get_flags(watch.watch);
+                nfds++;
+            }
+        }
+        if (poll.poll(fds.ptr, nfds, -1) == -1) {
+            logerror("Error waiting for dbus: ", strerror(errno));
+        }
+        for(int i=0;i<nfds;i++) {
+            auto pfd = fds[i];
+            short flags = cast(short)dbus_watch_get_flags(watches[i].watch);
+            logdebug("which: ",i,", flags: ",flags, ", revents: ", pfd.revents);
+            if ((pfd.revents & flags) >0 ) {
+                logdebug("Handling watch");
+                dbus_watch_handle(watches[i].watch, flags);
+                while(dbus_connection_dispatch(watches[i].connection) == DBusDispatchStatus.DBUS_DISPATCH_DATA_REMAINS) {}
+            }
+        }
+    }
 }
 
+extern (C) {
+uint onAddWatch(DBusWatch* watch, void *data)
+{
+    if (dbus_watch_get_enabled(watch)) {
+        logdebug("onAddWatch() ", watch);
+        WatchConn watchCon = {
+            watch : watch,
+            connection : cast(DBusConnection*)data
+        };
+        watches.insertBack(watchCon);
+    }
+    return 1;
+}
+
+void onRemoveWatch(DBusWatch* watch, void *data)
+{
+    logdebug("onRemoveWatch()");
+    WatchConn watchCon = {
+            watch : watch,
+            connection : cast(DBusConnection*)data
+        };
+    auto range = watches[];
+    watches.linearRemove(range.find(watchCon).take(1));
+}
+
+void onWatchToggled(DBusWatch* watch, void *data)
+{
+    logdebug("onWatchToggled()");
+    WatchConn watchCon = {
+            watch : watch,
+            connection : cast(DBusConnection*)data
+        };
+    auto range = watches[];
+    if(range.canFind(watchCon))
+        watches.linearRemove(range.find(watchCon).take(1));
+    else
+        watches.insertBack(watchCon);
+}
+/+
+uint onAddTimeout(DBusTimeout* timeout, void *data)
+{
+    logdebug("onAddTimeout()");
+    timeouts.insertBack(timeout);
+    return 1;
+}
+
+void onRemoveTimeout(DBusTimeout* timeout, void *data)
+{
+  logdebug("onRemoveTimeout()");
+}
+
+void onTimeoutToggled(DBusTimeout* timeout, void *data)
+{
+  logdebug("onTimeoutToggled()");
+}+/
+
+}
 
