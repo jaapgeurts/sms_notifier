@@ -11,21 +11,20 @@ import ddbus.c_lib;
 import logging;
 import modem;
 
-enum NotificationClosedReason {
+private enum NotificationClosedReason {
     Expired = 1,
     DismissedByUser = 2,
     ClosedByCode = 3,
     UndefinedReserved = 4
 }
 
-struct Notification {
+private struct Notification {
     uint id;
     string sms_path;
     string number;
 }
 
-// FIXME: bad bad bad because it's global shared
-__gshared Notification[uint] notifications;
+private Notification[uint] notifications;
 
 void DBusClientNotificationsProc(Connection sessbus, LogLevel ll) {
 

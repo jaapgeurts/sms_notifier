@@ -3,6 +3,7 @@ import std.concurrency;
 import std.container;
 import std.algorithm.searching : find, canFind;
 import std.range: take;
+
 import core.stdc.errno;
 import core.stdc.string : strerror;
 
@@ -85,7 +86,6 @@ void main(string[] args) {
         for(int i=0;i<nfds;i++) {
             auto pfd = fds[i];
             short flags = cast(short)dbus_watch_get_flags(watches[i].watch);
-            logdebug("which: ",i,", flags: ",flags, ", revents: ", pfd.revents);
             if ((pfd.revents & flags) >0 ) {
                 logdebug("Handling watch");
                 dbus_watch_handle(watches[i].watch, flags);
