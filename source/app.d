@@ -83,6 +83,7 @@ void main(string[] args) {
         if (poll.poll(fds.ptr, nfds, -1) == -1) {
             logerror("Error in poll() on dbus fd's: ", strerror(errno));
         }
+        // Check each of the fildes and handle messages
         for(int i=0;i<nfds;i++) {
             auto pfd = fds[i];
             short flags = cast(short)dbus_watch_get_flags(watches[i].watch);

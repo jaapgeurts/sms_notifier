@@ -35,12 +35,27 @@ private void selectionProc(string text, LogLevel ll) {
     int N = DefaultScreen(display);
     window = XCreateSimpleWindow(display, RootWindow(display, N), 0, 0, 1, 1, 0,
         BlackPixel(display, N), WhitePixel(display, N));
+    if (window ==  None ) {
+        logerror("Can't create window");
+        return;
+    }
     targets_atom = XInternAtom(display, "TARGETS", 0);
+    if (targets_atom ==  None) {
+        logerror("Can't get atom TARGETS");
+        return;
+    }
     text_atom = XInternAtom(display, "TEXT", 0);
+    if (text_atom ==  None) {
+        logerror ("Can't get atom TEXT");
+        return;
+    }
     UTF8 = XInternAtom(display, "UTF8_STRING", 1);
     if (UTF8 == None)
         UTF8 = XA_STRING;
     selection = XInternAtom(display, "CLIPBOARD", 0);
+    if (selection == None) {
+        logerror("Can't get atom CLIPBOARD");
+    }
     logdebug("Clipboard open");
 
     XSetSelectionOwner(display, selection, window, 0);
@@ -51,7 +66,7 @@ private void selectionProc(string text, LogLevel ll) {
 
     bool ownSelection = true;
 
-    XEvent event;   
+    XEvent event;
     const char* textarray = text.toStringz;
 
     while (ownSelection) {
@@ -60,7 +75,6 @@ private void selectionProc(string text, LogLevel ll) {
         case SelectionRequest:
             if (event.xselectionrequest.selection != selection)
                 break;
-            loginfo("XClipboard::SelectionRequest. Storing data in atom");
             XSelectionRequestEvent* xsr = &event.xselectionrequest;
             XSelectionEvent ev = {0};
             int R = 0;
@@ -84,8 +98,10 @@ private void selectionProc(string text, LogLevel ll) {
                         .length);
             else
                 ev.property = None;
-            if ((R & 2) == 0)
+            if ((R & 2) == 0) {
+                loginfo("XClipboard::SelectionRequest. Storing data in atom");
                 XSendEvent(display, ev.requestor, 0, 0, cast(XEvent*)&ev);
+            }
             break;
         case SelectionClear:
             ownSelection = false;
