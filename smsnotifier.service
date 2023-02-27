@@ -1,5 +1,6 @@
 [Unit]
 Description=Show SMS notifications
+After=graphical-session.target
 
 [Service]
 Type=simple

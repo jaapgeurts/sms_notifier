@@ -35,18 +35,18 @@ private void selectionProc(string text, LogLevel ll) {
     int N = DefaultScreen(display);
     window = XCreateSimpleWindow(display, RootWindow(display, N), 0, 0, 1, 1, 0,
         BlackPixel(display, N), WhitePixel(display, N));
-    if (window ==  None ) {
+    if (window == None) {
         logerror("Can't create window");
         return;
     }
     targets_atom = XInternAtom(display, "TARGETS", 0);
-    if (targets_atom ==  None) {
+    if (targets_atom == None) {
         logerror("Can't get atom TARGETS");
         return;
     }
     text_atom = XInternAtom(display, "TEXT", 0);
-    if (text_atom ==  None) {
-        logerror ("Can't get atom TEXT");
+    if (text_atom == None) {
+        logerror("Can't get atom TEXT");
         return;
     }
     UTF8 = XInternAtom(display, "UTF8_STRING", 1);
