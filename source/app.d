@@ -57,15 +57,16 @@ void main(string[] args) {
 
     Connection sysbus = connectToBus(DBusBusType.DBUS_BUS_SYSTEM);
     Connection sessbus = connectToBus();
-    scope (exit) {
-        sysbus.close();
-        sessbus.close();
-    }
+    // closing these connections is not necessary
 
+    // TODO: disable exit on disconnect and try to reconnect
+    // Check what happens when the modem disappears
+
+    // setup dbus watch functions
     dbus_connection_set_watch_functions(sysbus.conn, &onAddWatch, &onRemoveWatch, &onWatchToggled, sysbus.conn, &dbus_free);
-
     dbus_connection_set_watch_functions(sessbus.conn, &onAddWatch, &onRemoveWatch, &onWatchToggled, sessbus.conn, &dbus_free);
 
+    // setup callbacks
     DBusClientModemProc(sysbus, logLevel);
     DBusClientNotificationsProc(sessbus, logLevel);
 

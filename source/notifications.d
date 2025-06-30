@@ -4,6 +4,7 @@ import std.functional : toDelegate;
 import std.conv : to;
 
 import xclipboard;
+import wlclipboard;
 
 import ddbus;
 import ddbus.c_lib;
@@ -55,34 +56,38 @@ void DBusClientNotificationsProc(Connection sessbus, LogLevel ll) {
     registerRouter(sessbus, router);
 }
 
-void sendNotification(string text, string path, string number) {
+void sendNotification(string text, string sms_dbus_path, string totp_number) {
 
+    Connection conn = connectToBus();
     // Send message
     DBusError error;
-    Connection conn = Connection(dbus_bus_get_private(DBusBusType.DBUS_BUS_SESSION, &error));
-    scope (exit) conn.close();
     PathIface dbus_notify = new PathIface(conn,
         busName("org.freedesktop.Notifications"),
         ObjectPath("/org/freedesktop/Notifications"),
         interfaceName("org.freedesktop.Notifications"));
     string[] list; // must have even num elements. even elem = action, odd elem = message to user
     list ~= "copy"; //action key for use with notification handler
-    list ~= "Copy " ~ number; // user message
+    list ~= "Copy " ~ totp_number; // user message
     list ~= "copydelete";
-    list ~= "Copy " ~ number ~ " and delete";
+    list ~= "Copy " ~ totp_number ~ " and delete";
 
-    ddbus.Variant!DBusAny[string] map;
+    ddbus.Variant!DBusAny[string] hints;
 
+    hints["image-path"] = variant(DBusAny("message-new"));
+    hints["desktop-entry"] = variant(DBusAny("smsnotifier"));
+
+    // TODO: allow configuratin of timeout. currently is is 10.000 ms
     Message msg = dbus_notify.Notify("SMS Received", cast(uint) 0,
         "mail-message-new-list",
         "A SMS message was received",
-        text, list, map, 10_000);
+        text, list, hints, -1);
 
     uint id = msg.to!uint();
-    Notification notification = Notification(id, path, number);
+    Notification notification = Notification(id, sms_dbus_path, totp_number);
     notifications[id] = notification;
     loginfo("Created notification with id: ", id);
 }
+
 
 private void onNotificationActionInvoked(uint id, string action_key) {
     logdebug("notificationActionInvoked(): " ~ to!string(id) ~ ", action: " ~ action_key);
